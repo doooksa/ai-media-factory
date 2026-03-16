@@ -1,0 +1,8 @@
+Django>=4.2
+djangorestframework
+django-cors-headers
+openai
+python-dotenv
+psycopg2-binary
+pytest
+pytest-django
