@@ -9,8 +9,14 @@ const selectedAccount = ref(null)
 const isLoading = ref(false)
 const isFetching = ref(true)
 
+// Состояние видео-плеера
+const showVideoModal = ref(false)
+const currentVideoUrl = ref('')
+const processingScripts = ref(new Set())
+
 // API URL
 const API_BASE = 'http://localhost:8000/api'
+const MEDIA_BASE = 'http://localhost:8000/media'
 
 // Загрузка данных
 const fetchData = async () => {
@@ -22,6 +28,13 @@ const fetchData = async () => {
     accounts.value = await accRes.json()
     scripts.value = await scriptRes.json()
     if (accounts.value.length > 0) selectedAccount.value = accounts.value[0].id
+    
+    // Проверяем статусы обработки
+    scripts.value.forEach(s => {
+      if (s.status === 'processing') {
+        startPolling(s.id)
+      }
+    })
   } catch (e) {
     console.error("Ошибка загрузки данных:", e)
   } finally {
@@ -55,6 +68,58 @@ const generateScript = async () => {
   } finally {
     isLoading.value = false
   }
+}
+
+// Сборка видео
+const assembleVideo = async (scriptId) => {
+  try {
+    const response = await fetch(`${API_BASE}/generate-video/${scriptId}/`, {
+      method: 'POST'
+    })
+    if (response.ok) {
+      const scriptIndex = scripts.value.findIndex(s => s.id === scriptId)
+      if (scriptIndex !== -1) {
+        scripts.value[scriptIndex].status = 'processing'
+        startPolling(scriptId)
+      }
+    }
+  } catch (e) {
+    console.error("Ошибка запуска сборки видео:", e)
+  }
+}
+
+// Опрос статуса видео
+const startPolling = (scriptId) => {
+  if (processingScripts.value.has(scriptId)) return
+  processingScripts.value.add(scriptId)
+  
+  const poll = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/scripts/${scriptId}/`)
+      const data = await response.json()
+      
+      const scriptIndex = scripts.value.findIndex(s => s.id === scriptId)
+      if (scriptIndex !== -1) {
+        scripts.value[scriptIndex] = data
+        
+        if (data.status === 'completed' || data.status === 'failed') {
+          processingScripts.value.delete(scriptId)
+          return // Стоп опрос
+        }
+      }
+      setTimeout(poll, 3000)
+    } catch (e) {
+      console.error("Ошибка опроса статуса:", e)
+      processingScripts.value.delete(scriptId)
+    }
+  }
+  poll()
+}
+
+// Показ видео
+const openVideo = (videoPath) => {
+  currentVideoUrl.value = `${MEDIA_BASE}/${videoPath}`
+  showVideoModal.value = true
 }
 
 onMounted(fetchData)
@@ -163,25 +228,75 @@ onMounted(fetchData)
           >
             <div class="flex flex-col md:flex-row gap-6">
               <div class="flex-1 space-y-4">
-                <div class="flex items-center gap-3">
-                  <span class="bg-blue-600/20 text-blue-400 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded">REELS</span>
-                  <span class="text-xs text-slate-500">{{ script.account_name }}</span>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <span class="bg-blue-600/20 text-blue-400 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded">REELS</span>
+                    <span class="text-xs text-slate-500">{{ script.account_name }}</span>
+                  </div>
+                  
+                  <!-- Статус видео -->
+                  <div v-if="script.status === 'processing'" class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold text-blue-400 animate-pulse uppercase tracking-widest">Рендеринг...</span>
+                    <div class="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div class="h-full bg-blue-500 animate-[progress_2s_ease-in-out_infinite]"></div>
+                    </div>
+                  </div>
                 </div>
+
                 <h4 class="text-2xl font-bold text-white group-hover:text-blue-400 transition-colors">{{ script.title }}</h4>
                 <p class="text-slate-400 leading-relaxed bg-[#0d1117] p-5 rounded-2xl border border-slate-800/50 whitespace-pre-line italic">
                   "{{ script.script_text }}"
                 </p>
+
                 <div class="flex items-center justify-between pt-2">
                    <div class="text-[10px] font-bold text-slate-600 uppercase">{{ new Date(script.created_at).toLocaleString() }}</div>
-                   <button class="text-xs font-bold text-blue-500 hover:text-blue-400 uppercase tracking-wider">Копировать</button>
+                   
+                   <div class="flex items-center gap-4">
+                      <!-- Кнопка сборки видео -->
+                      <button 
+                        v-if="script.status === 'pending' || script.status === 'failed'"
+                        @click="assembleVideo(script.id)"
+                        class="flex items-center gap-2 text-xs font-bold text-blue-500 hover:text-blue-400 uppercase tracking-wider group/btn"
+                      >
+                        🎥 <span class="group-hover/btn:underline">Собрать видео</span>
+                      </button>
+                      
+                      <!-- Кнопка просмотра видео -->
+                      <button 
+                        v-if="script.status === 'completed'"
+                        @click="openVideo(script.video_file)"
+                        class="flex items-center gap-2 text-xs font-bold text-green-500 hover:text-green-400 uppercase tracking-wider group/btn"
+                      >
+                        ▶️ <span class="group-hover/btn:underline">Смотреть результат</span>
+                      </button>
+
+                      <button class="text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-wider">Копировать</button>
+                   </div>
                 </div>
               </div>
             </div>
           </article>
         </div>
       </section>
-
     </main>
+
+    <!-- Video Modal -->
+    <div v-if="showVideoModal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+      <div class="absolute inset-0 bg-black/90 backdrop-blur-sm" @click="showVideoModal = false"></div>
+      <div class="relative bg-[#161b22] rounded-3xl overflow-hidden border border-slate-800 shadow-2xl max-w-sm w-full">
+        <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-[#1c2128]">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">AI Video Preview</span>
+          <button @click="showVideoModal = false" class="text-slate-500 hover:text-white transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="aspect-[9/16] bg-black">
+          <video :src="currentVideoUrl" controls autoplay class="w-full h-full object-contain"></video>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -199,5 +314,11 @@ onMounted(fetchData)
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #30363d;
+}
+
+@keyframes progress {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0); }
+  100% { transform: translateX(100%); }
 }
 </style>

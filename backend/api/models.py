@@ -26,7 +26,8 @@ class ContentScript(models.Model):
     account = models.ForeignKey(MedicalAccount, on_delete=models.CASCADE, related_name='scripts', null=True, blank=True)
     title = models.CharField(max_length=255)
     script_text = models.TextField()
-    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='completed')
+    video_file = models.FileField(upload_to='videos/', null=True, blank=True)
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

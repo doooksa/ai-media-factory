@@ -11,4 +11,4 @@ class ContentScriptSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ContentScript
-        fields = ['id', 'account', 'account_name', 'title', 'script_text', 'status', 'created_at']
+        fields = ['id', 'account', 'account_name', 'title', 'script_text', 'status', 'video_file', 'created_at']
